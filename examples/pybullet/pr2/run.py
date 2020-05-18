@@ -273,7 +273,7 @@ def main(display=True, teleport=False, partial=False):
         control_commands(commands)
     else:
         apply_commands(State(), commands, time_step=0.01)
-    user_input('Finish?')
+    # user_input('Finish?')
     disconnect()
     # TODO: need to wrap circular joints
 

@@ -90,14 +90,15 @@ def pddlstream_from_problem(robot, movable=[], teleport=False, grasp_name='top')
         if 'stove' in name:
             init += [('Stove', body)]
 
-    body = movable[0]
+    body1 = movable[0]
+    body2 = movable[1]
     goal = ('and',
             ('AtConf', conf),
             #('Holding', body),
-            #('On', body, fixed[1]),
-            #('On', body, fixed[2]),
-            #('Cleaned', body),
-            ('Cooked', body),
+            ('On', body1, fixed[0]),
+            ('On', body2, fixed[0]),
+            ('Cleaned', body2),
+            ('Cooked', body1),
     )
 
     stream_map = {
@@ -194,10 +195,10 @@ def main(display=True, teleport=False):
 
     command = postprocess_plan(plan)
     if args.simulate:
-        user_input('Simulate?')
+        # user_input('Simulate?')
         command.control()
     else:
-        user_input('Execute?')
+        # user_input('Execute?')
         #command.step()
         command.refine(num_steps=10).execute(time_step=0.001)
 
