@@ -167,7 +167,7 @@ def backtrack_axioms(conditions, axioms_from_effect, visited_atoms):
 def recover_axioms_plans(instantiated, action_instances):
     #axioms, axiom_init, _ = axiom_rules.handle_axioms(
     #    instantiated.actions, instantiated.axioms, instantiated.goal_list)
-    axioms, axiom_init = instantiated.axioms, [] # TODO: bug when needing to reachieve negated
+    axioms, axiom_init = instantiated.fluent_axioms, [] # TODO: bug when needing to reachieve negated
     axioms_from_effect = defaultdict(list)
     for axiom in axioms:
         axioms_from_effect[axiom.effect].append(axiom)

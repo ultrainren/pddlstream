@@ -10,7 +10,7 @@ from pddlstream.algorithms.disabled import push_disabled, reenable_disabled, pro
 from pddlstream.algorithms.disable_skeleton import create_disabled_axioms
 from pddlstream.algorithms.incremental import process_stream_queue
 from pddlstream.algorithms.instantiation import Instantiator
-from pddlstream.algorithms.refinement import iterative_plan_streams, get_optimistic_solve_fn, plan_action_plan_stream
+from pddlstream.algorithms.refinement import plan_action_plan_stream
 from pddlstream.algorithms.reorder import reorder_stream_plan
 from pddlstream.algorithms.skeleton import SkeletonQueue
 from pddlstream.algorithms.visualization import reset_visualizations, create_visualizations, \
@@ -114,11 +114,6 @@ def solve_focused(problem, constraints=PlanConstraints(), stream_info={}, replan
             'Eager Calls: {} | Cost: {:.3f} | Search Time: {:.3f} | Sample Time: {:.3f} | Total Time: {:.3f}'.format(
                 num_iterations, complexity_limit, len(skeleton_queue.skeletons), len(skeleton_queue), len(disabled),
                 len(evaluations), eager_calls, store.best_cost, search_time, sample_time, store.elapsed_time()))
-        optimistic_solve_fn = get_optimistic_solve_fn(goal_exp, domain, negative,
-                                                      replan_actions=replan_actions, reachieve=use_skeletons,
-                                                      max_cost=min(store.best_cost, constraints.max_cost),
-                                                      max_effort=max_effort, effort_weight=effort_weight,
-                                                      **search_kwargs)
         optms_plan_solver = OptimisticPlanSolver(goal_exp, domain, negative, search_kwargs,
                                                  max_effort=max_effort, effort_weight=effort_weight)
         # TODO: just set unit effort for each stream beforehand
@@ -126,10 +121,9 @@ def solve_focused(problem, constraints=PlanConstraints(), stream_info={}, replan
             disabled_axioms = create_disabled_axioms(skeleton_queue) if has_optimizers else []
             if disabled_axioms:
                 domain.axioms.extend(disabled_axioms)
-            # stream_plan, action_plan, cost = iterative_plan_streams(evaluations, (streams + functions + optimizers),
-            #                                                         optimistic_solve_fn, complexity_limit,
-            #                                                         max_effort=max_effort)
-            stream_plan, action_plan, cost = plan_action_plan_stream(optms_plan_solver, evaluations, (streams + functions + optimizers),
+
+            stream_plan, action_plan, cost = plan_action_plan_stream(optms_plan_solver, evaluations,
+                                                                     (streams + functions + optimizers),
                                                                      complexity_limit, max_effort=max_effort)
             for axiom in disabled_axioms:
                 domain.axioms.remove(axiom)

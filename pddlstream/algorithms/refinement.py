@@ -4,10 +4,6 @@ from itertools import product
 from copy import deepcopy, copy
 from collections import namedtuple
 from pddlstream.algorithms.instantiation import Instantiator
-from pddlstream.algorithms.scheduling.utils import partition_results
-from pddlstream.algorithms.scheduling.stream_action import add_stream_actions
-from pddlstream.algorithms.scheduling.add_optimizers import using_optimizers
-from pddlstream.algorithms.scheduling.plan_streams import plan_streams,OptimisticPlanSolver
 from pddlstream.algorithms.scheduling.recover_streams import evaluations_from_stream_plan, get_achieving_streams
 from pddlstream.algorithms.constraints import add_plan_constraints, PlanConstraints, WILD
 from pddlstream.language.constants import FAILED, INFEASIBLE, is_plan, str_from_plan, get_length
@@ -157,91 +153,7 @@ def compute_skeleton_constraints(action_plan, bindings):
     return PlanConstraints(skeletons=[skeleton], groups=groups, exact=False, max_cost=INF)
 
 
-def get_optimistic_solve_fn(goal_exp, domain, negative, max_cost=INF, **kwargs):
-    # TODO: apply to hierarchical actions representations (will need to instantiate more actions)
-    def fn(evaluations, results, constraints):
-        if constraints is None:
-            return plan_streams(evaluations, goal_exp, domain, results, negative,
-                                max_cost=max_cost, **kwargs)
-        # print(*relaxed_stream_plan(evaluations, goal_exp, domain, results, negative,
-        #                               max_cost=max_cost, **kwargs))
-        # constraints.dump()
-        domain2 = deepcopy(domain)
-        evaluations2 = copy(evaluations)
-        goal_exp2 = add_plan_constraints(constraints, domain2, evaluations2, goal_exp, internal=True)
-        max_cost2 = max_cost if constraints is None else min(max_cost, constraints.max_cost)
-        return plan_streams(evaluations2, goal_exp2, domain2, results, negative,
-                            max_cost=max_cost2, **kwargs)
-
-    return fn
-
-
 ##################################################
-
-
-def hierarchical_plan_streams(evaluations, externals, results, optimistic_solve_fn, complexity_limit,
-                              depth, constraints, **effort_args):
-    if MAX_DEPTH <= depth:
-        return None, None, INF, depth
-    stream_plan, action_plan, cost = optimistic_solve_fn(evaluations, results, constraints)
-    if not is_plan(action_plan):
-        return stream_plan, action_plan, cost, depth
-
-    if is_refined(stream_plan):
-        return stream_plan, action_plan, cost, depth
-    new_results, bindings = optimistic_stream_evaluation(evaluations, stream_plan)
-    if not CONSTRAIN_STREAMS and not CONSTRAIN_PLANS:
-        return None, None, INF, depth + 1
-    if CONSTRAIN_STREAMS:
-        next_results = compute_stream_results(evaluations, new_results, externals, **effort_args)
-    else:
-        next_results, _ = optimistic_evaluate_streams(evaluations, externals, complexity_limit, **effort_args)
-    next_constraints = None
-    if CONSTRAIN_PLANS:
-        next_constraints = compute_skeleton_constraints(action_plan, bindings)
-    return hierarchical_plan_streams(evaluations, externals, next_results, optimistic_solve_fn, complexity_limit,
-                                     depth + 1, next_constraints, **effort_args)
-
-
-def get_U(evaluations, all_results, max_effort=INF, simultaneous=False, reachieve=True):
-    applied_results, deferred_results = partition_results(evaluations, all_results, apply_now=lambda r: not (
-            simultaneous or r.external.info.simultaneous))
-    if reachieve and not using_optimizers(all_results):
-        achieved_results = {n.result for n in evaluations.values() if isinstance(n.result, Result)}
-        init_evaluations = {e for e, n in evaluations.items() if n.result not in achieved_results}
-        applied_results = achieved_results | set(applied_results)
-        evaluations = init_evaluations  # For clarity
-    # TODO: could iteratively increase max_effort
-    node_from_atom = get_achieving_streams(evaluations, applied_results,  # TODO: apply to all_results?
-                                           max_effort=max_effort)
-
-    return node_from_atom
-
-
-def iterative_plan_streams(all_evaluations, externals, optimistic_solve_fn, complexity_limit, **effort_args):
-    # Previously didn't have unique optimistic objects that could be constructed at arbitrary depths
-    complexity_evals = {e: n for e, n in all_evaluations.items() if n.complexity <= complexity_limit}
-    num_iterations = 0
-    while True:
-        num_iterations += 1
-        results, exhausted = optimistic_evaluate_streams(complexity_evals, externals, complexity_limit, **effort_args)
-        # node_from_atom = get_U(complexity_evals, results, **effort_args)
-        stream_plan, action_plan, cost, final_depth = hierarchical_plan_streams(complexity_evals, externals, results,
-                                                                                optimistic_solve_fn, complexity_limit,
-                                                                                depth=0, constraints=None,
-                                                                                **effort_args)
-
-        # stream_plan, action_plan, cost, final_depth = hierarchical_plan_streams(
-        #     complexity_evals, externals, results, optimistic_solve_fn, complexity_limit,
-        #     depth=0, constraints=None, **effort_args)
-        print('Attempt: {} | Results: {} | Depth: {} | Success: {}'.format(
-            num_iterations, len(results), final_depth, is_plan(action_plan)))
-        if is_plan(action_plan):
-            return stream_plan, action_plan, cost
-        if final_depth == 0:
-            status = INFEASIBLE if exhausted else FAILED
-            return status, status, cost
-    # TODO: should streams along the sampled path automatically have no optimistic value
 
 
 def is_plan_successful(plan):
@@ -258,63 +170,6 @@ def is_plan_certified(stream_plan):
     r = all((result.opt_index is None) or (result.opt_index == 0)
             for result in stream_plan)
     return r
-
-
-def generate_optimistic_results(init_evals, streams, level_limit, max_stream_effort):
-    """
-    Generate optimistic StreamResults under the maximum level, based on input starting facts and Streams
-    e.g., from <Stream> sample-pose:('?o', '?r')->('?p',)  to <StreamResult> sample-pose:(5, 2)->(#o2)
-
-    Return a mapping from fact to its causal StreamResult.
-    """
-    light_streams = prune_high_effort_streams(streams, max_stream_effort)
-
-    # Mapping U: The mapping from fact (tuple) to ResutlNode[effort,level,stream result]
-    dict_fact_node = {}
-
-    # Container of the information for generating optimistic stream results.
-    instantiator = Instantiator(light_streams)
-
-    # Here initial facts are added into Instantiator as evaluations(atoms)
-    for evaluation, eval_node in init_evals.items():
-        # Facts(evaluations) only related to domains of existing streams of instantiator will be accepted!!!
-        if eval_node.level <= level_limit:
-            # Add atom to instantiator, and thereafter add StreamInstance to the Stream and to the Instantiator queue
-            is_new = instantiator.try_addEval_addInstance(evaluation, eval_node.level)
-            if not (evaluation.value is False) and is_new:
-                fact = eval2fact(evaluation)
-                # Initial facts correspond to null ResultNodes.
-                dict_fact_node[fact] = ResultNode(effort=0, level=0, result=None)
-
-    optms_results = []  # list of results with ascending level number
-    while instantiator.instance_queue and (instantiator.min_level <= level_limit):
-        level, instance = instantiator.pop_instance()  # Get the verified instance with the least level (complexity)
-        result = instance.get_optimistic_result()  # result = [_result] or []
-        if not result:
-            continue
-        [result] = result
-        is_valid_fact = False
-
-        for new_fact in result.get_certified_facts():
-            new_eval = fact2eval(new_fact)
-            is_valid_fact = instantiator.try_addEval_addInstance(new_eval, level)
-            """Facts certified by new results will be used to generate new instances."""
-            effort = result.get_effort() + EFFORT_OP(dict_fact_node[fact].effort
-                                                     for fact in result.instance.get_domain())
-            if (new_fact not in dict_fact_node) or (effort < dict_fact_node[new_fact].effort) or isinstance(result,
-                                                                                                            FunctionResult):
-                """If the certified fact is new or it has less effort,
-                   then add it to the dict and queue."""
-                dict_fact_node[new_fact] = ResultNode(effort=effort, level=level, result=result)
-
-        if is_valid_fact or isinstance(result, FunctionResult):
-            optms_results.append(result)
-
-    """If exhausted: the while loop terminates due to the depleted instantiator queue,
-       else: due to the maximum level limit."""
-    exhausted = not instantiator.instance_queue
-
-    return dict_fact_node, optms_results, exhausted
 
 
 def unique_instances(init_evals, stream_plan):
@@ -341,20 +196,20 @@ def unique_instances(init_evals, stream_plan):
                 accm_evals.update(map(fact2eval, new_result.get_certified()))
 
 
-def plan_action_plan_stream(optms_plan_solver, all_init_evals, externals, level_limit, **effort_args):
+def plan_action_plan_stream(optms_plan_solver, evaluations, externals, level_limit, **effort_args):
     # externals = (streams + functions + optimizers)
     # Previously didn't have unique optimistic objects that could be constructed at arbitrary depths
-    complexity_evals = {e: n for e, n in all_init_evals.items() if n.complexity <= level_limit}
+    limited_evals = {e: n for e, n in evaluations.items() if n.complexity <= level_limit}
     num_iterations = 0
     while True:
         num_iterations += 1
 
-        results, exhausted = optimistic_evaluate_streams(complexity_evals, externals, level_limit, **effort_args)
+        optms_results, exhausted = optimistic_evaluate_streams(limited_evals, externals, level_limit, **effort_args)
 
-        stream_plan, action_plan, cost = optms_plan_solver.planner_core(complexity_evals, results)
+        stream_plan, action_plan, cost = optms_plan_solver.planner_core(limited_evals, optms_results)
 
         print('  Attempt: {} | Results: {} | Success: {} | Certified: {}'.format(
-            num_iterations, len(results), is_plan_successful(action_plan), is_plan_certified(stream_plan)))
+            num_iterations, len(optms_results), is_plan_successful(action_plan), is_plan_certified(stream_plan)))
 
         if not is_plan_successful(action_plan):
             # if the plan is not successful, then break and start a new session with increased level_limit
@@ -364,5 +219,5 @@ def plan_action_plan_stream(optms_plan_solver, all_init_evals, externals, level_
             # If the plan is all unique and successful, then return the plans
             return stream_plan, action_plan, cost
         else:
-            unique_instances(complexity_evals, stream_plan)
+            unique_instances(limited_evals, stream_plan)
             # continue the while loop

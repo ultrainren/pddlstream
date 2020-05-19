@@ -3,7 +3,7 @@ from __future__ import print_function
 import copy
 
 from collections import defaultdict
-
+from instantiate import gen_inst_task
 from pddlstream.algorithms.downward import get_problem, task_from_domain_problem, get_cost_scale, \
     scale_cost, fd_from_fact, make_domain, make_predicate, evaluation_from_fd, plan_preimage, fact_from_fd, \
     conditions_hold
@@ -37,12 +37,12 @@ from pddlstream.utils import Verbose, INF, flatten
 
 
 def add_stream_efforts(node_from_atom, instantiated, effort_weight, **kwargs):
-    cost_from_action = {action: action.cost for action in instantiated.actions}
+    cost_from_action = {action: action.cost for action in instantiated.fluent_actions}
     if effort_weight is None:
         return cost_from_action
     # TODO: make effort just a multiplier (or relative) to avoid worrying about the scale
     # efforts = [] # TODO: regularize & normalize across the problem?
-    for instance in instantiated.actions:
+    for instance in instantiated.fluent_actions:
         # TODO: prune stream actions here?
         # TODO: round each effort individually to penalize multiple streams
         facts = get_instance_facts(instance, node_from_atom)
@@ -61,7 +61,7 @@ def add_stream_efforts(node_from_atom, instantiated, effort_weight, **kwargs):
 
 def rename_instantiated_actions(instantiated):
     # TODO: rename SAS instead?
-    actions = instantiated.actions[:]
+    actions = instantiated.fluent_actions[:]
     renamed_actions = []
     action_from_name = {}
     for i, action in enumerate(actions):
@@ -69,7 +69,7 @@ def rename_instantiated_actions(instantiated):
         renamed_name = 'a{}'.format(i)
         renamed_actions[-1].name = '({})'.format(renamed_name)
         action_from_name[renamed_name] = action  # Change reachable_action_params?
-    instantiated.actions[:] = renamed_actions
+    instantiated.fluent_actions[:] = renamed_actions
     return action_from_name
 
 
@@ -192,8 +192,23 @@ def recover_stream_plan(evaluations, current_plan, opt_evaluations, goal_express
 ##################################################
 
 
-def solve_optimistic_sequential(stream_domain, opt_evaluations, node_from_atom, goal_expression,
-                                effort_weight, debug=False, **kwargs):
+def solve_optimistic_sequential(instantiated, debug=False, **search_kwargs):
+    action_from_name = rename_instantiated_actions(instantiated)
+    with Verbose(debug):
+        sas_task = sas_from_instantiated(instantiated)
+        sas_task.metric = True
+
+    # TODO: apply renaming to hierarchy as well
+    # solve_from_task | serialized_solve_from_task | abstrips_solve_from_task | abstrips_solve_from_task_sequential
+    renamed_plan, _ = solve_from_task(sas_task, debug=False, **search_kwargs)
+    if renamed_plan is None:
+        return None
+    action_instances = [action_from_name[name] for name, _ in renamed_plan]
+    return action_instances
+
+
+def solve_optimistic_sequential0(stream_domain, opt_evaluations, node_from_atom, goal_expression,
+                                 effort_weight, debug=False, **kwargs):
     problem = get_problem(opt_evaluations, goal_expression, stream_domain)  # begin_metric
     with Verbose():
         instantiated = instantiate_task(task_from_domain_problem(stream_domain, problem))
@@ -217,39 +232,9 @@ def solve_optimistic_sequential(stream_domain, opt_evaluations, node_from_atom, 
     return instantiated, action_instances, cost
 
 
-def plan_streams(evaluations, goal_expression, domain, all_results, negative, effort_weight, max_effort,
-                 simultaneous=False, reachieve=True, replan_actions=set(), **kwargs):
-    # TODO: alternatively could translate with stream actions on real opt_state and just discard them
-    # TODO: only consider axioms that have stream conditions?
-    # reachieve = reachieve and not using_optimizers(all_results)
-
-    node_from_atom = get_achieving_streams(evaluations, all_results,
-                                           max_effort=max_effort)
-
-    opt_evaluations = {evaluation_from_fact(f): n.result for f, n in node_from_atom.items()}
-
-    instantiated, action_instances, cost = solve_optimistic_sequential(domain, opt_evaluations,
-                                                                       node_from_atom, goal_expression, effort_weight,
-                                                                       **kwargs)
-    if action_instances is None:
-        return None, None, cost
-
-    axiom_plans = recover_axioms_plans(instantiated, action_instances)
-
-    stream_plan, action_instances = recover_simultaneous(all_results, negative,
-                                                         [], action_instances)
-
-    action_plan = transform_plan_args(map(pddl_from_instance, action_instances), obj_from_pddl)
-    replan_step = min([step + 1 for step, action in enumerate(action_plan)
-                       if action.name in replan_actions] or [len(action_plan)])
-    stream_plan, action_plan = recover_stream_plan(evaluations, stream_plan, opt_evaluations, goal_expression,
-                                                   domain,
-                                                   node_from_atom, action_instances, axiom_plans, negative, replan_step)
-    return stream_plan, action_plan, cost
-
-
 class OptimisticPlanSolver(object):
-    def __init__(self, goal_exp, domain, negative, search_kwargs, replan_actions=set(), max_effort=INF, effort_weight=None):
+    def __init__(self, goal_exp, domain, negative, search_kwargs, replan_actions=set(), max_effort=INF,
+                 effort_weight=None):
         self.goal_exp = goal_exp
         self.domain = domain
         self.negative = negative  # negative predicates from the problem
@@ -258,34 +243,45 @@ class OptimisticPlanSolver(object):
         self.search_kwargs = search_kwargs
         self.replan_actions = replan_actions
 
-    def planner_core(self, evaluations, all_results):
+    def planner_core(self, evaluations, optms_results):
         """
         Generate an action_plan with its stream_plan
         based on initial evaluations and all optimistic facts.
         """
 
-        node_from_atom = get_achieving_streams(evaluations, all_results,
+        node_from_atom = get_achieving_streams(evaluations, optms_results,
                                                max_effort=self.max_effort)
 
-        opt_evaluations = {evaluation_from_fact(f): n.result for f, n in node_from_atom.items()}
+        optms_evaluations = {evaluation_from_fact(f): n.result for f, n in node_from_atom.items()}
 
-        instantiated, action_instances, cost = solve_optimistic_sequential(self.domain, opt_evaluations,
-                                                                           node_from_atom, self.goal_exp,
-                                                                           self.effort_weight,
-                                                                           **self.search_kwargs)
-        if action_instances is None:
+        problem = get_problem(optms_evaluations, self.goal_exp, self.domain)  # begin_metric
+        with Verbose():
+            # instantiated_task = instantiate_task()
+            pddl_task = task_from_domain_problem(self.domain, problem)
+            instantiated_task = gen_inst_task(pddl_task)
+
+        if instantiated_task is None:
+            return None, None, INF
+
+        cost_from_action = add_stream_efforts(node_from_atom, instantiated_task, self.effort_weight)
+
+        fluent_action_plan = solve_optimistic_sequential(instantiated_task, **self.search_kwargs)
+        cost = get_plan_cost(fluent_action_plan, cost_from_action)
+
+        if fluent_action_plan is None:
             return None, None, cost
 
-        axiom_plans = recover_axioms_plans(instantiated, action_instances)
+        list_fluent_axiom_plan = recover_axioms_plans(instantiated_task, fluent_action_plan)
 
-        stream_plan, action_instances = recover_simultaneous(all_results, self.negative,
-                                                             [], action_instances)
+        stream_plan, fluent_action_plan = recover_simultaneous(optms_results, self.negative,
+                                                               [], fluent_action_plan)
 
-        action_plan = transform_plan_args(map(pddl_from_instance, action_instances), obj_from_pddl)
+        action_plan = transform_plan_args(map(pddl_from_instance, fluent_action_plan), obj_from_pddl)
         replan_step = min([step + 1 for step, action in enumerate(action_plan)
                            if action.name in self.replan_actions] or [len(action_plan)])
-        stream_plan, action_plan = recover_stream_plan(evaluations, stream_plan, opt_evaluations, self.goal_exp,
+        stream_plan, action_plan = recover_stream_plan(evaluations, stream_plan, optms_evaluations, self.goal_exp,
                                                        self.domain,
-                                                       node_from_atom, action_instances, axiom_plans, self.negative,
+                                                       node_from_atom, fluent_action_plan, list_fluent_axiom_plan,
+                                                       self.negative,
                                                        replan_step)
         return stream_plan, action_plan, cost

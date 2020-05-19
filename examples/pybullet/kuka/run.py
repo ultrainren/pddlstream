@@ -18,10 +18,12 @@ from pddlstream.language.generator import from_gen_fn, from_fn, empty_gen
 from pddlstream.utils import read, INF, get_file_path, find_unique
 from pddlstream.language.constants import print_solution
 
+
 def get_fixed(robot, movable):
     rigid = [body for body in get_bodies() if body != robot]
     fixed = [body for body in rigid if body not in movable]
     return fixed
+
 
 def place_movable(certified):
     placed = []
@@ -34,30 +36,37 @@ def place_movable(certified):
                 placed.append(b)
     return placed
 
+
 def get_free_motion_synth(robot, movable=[], teleport=False):
     fixed = get_fixed(robot, movable)
+
     def fn(outputs, certified):
-        assert(len(outputs) == 1)
+        assert (len(outputs) == 1)
         q0, _, q1 = find_unique(lambda f: f[0] == 'freemotion', certified)[1:]
         obstacles = fixed + place_movable(certified)
         free_motion_fn = get_free_motion_gen(robot, obstacles, teleport)
         return free_motion_fn(q0, q1)
+
     return fn
+
 
 def get_holding_motion_synth(robot, movable=[], teleport=False):
     fixed = get_fixed(robot, movable)
+
     def fn(outputs, certified):
-        assert(len(outputs) == 1)
+        assert (len(outputs) == 1)
         q0, _, q1, o, g = find_unique(lambda f: f[0] == 'holdingmotion', certified)[1:]
         obstacles = fixed + place_movable(certified)
         holding_motion_fn = get_holding_motion_gen(robot, obstacles, teleport)
         return holding_motion_fn(q0, q1, o, g)
+
     return fn
+
 
 #######################################################
 
 def pddlstream_from_problem(robot, movable=[], teleport=False, grasp_name='top'):
-    #assert (not are_colliding(tree, kin_cache))
+    # assert (not are_colliding(tree, kin_cache))
 
     domain_pddl = read(get_file_path(__file__, 'domain.pddl'))
     stream_pddl = read(get_file_path(__file__, 'stream.pddl'))
@@ -94,21 +103,19 @@ def pddlstream_from_problem(robot, movable=[], teleport=False, grasp_name='top')
     body2 = movable[1]
     goal = ('and',
             ('AtConf', conf),
-            #('Holding', body),
+            # ('Holding', body),
             ('On', body1, fixed[0]),
             ('On', body2, fixed[0]),
-            ('Cleaned', body2),
+            ('Cooked', body2),
             ('Cooked', body1),
-    )
+            )
 
-    stream_map = {
-        'sample-pose': from_gen_fn(get_stable_gen(fixed)),
-        'sample-grasp': from_gen_fn(get_grasp_gen(robot, grasp_name)),
-        'inverse-kinematics': from_fn(get_ik_fn(robot, fixed, teleport)),
-        'plan-free-motion': from_fn(get_free_motion_gen(robot, fixed, teleport)),
-        'plan-holding-motion': from_fn(get_holding_motion_gen(robot, fixed, teleport)),
-        'TrajCollision': get_movable_collision_test(),
-    }
+    stream_map = {'sample-pose': from_gen_fn(get_stable_gen(fixed)),
+                  'sample-grasp': from_gen_fn(get_grasp_gen(robot, grasp_name)),
+                  'inverse-kinematics': from_fn(get_ik_fn(robot, fixed, teleport)),
+                  'plan-free-motion': from_fn(get_free_motion_gen(robot, fixed, teleport)),
+                  'plan-holding-motion': from_fn(get_holding_motion_gen(robot, fixed, teleport)),
+                  'TrajCollision': get_movable_collision_test(), }
 
     return domain_pddl, constant_map, stream_pddl, stream_map, init, goal
 
@@ -125,7 +132,7 @@ def load_world():
         stove = load_model(STOVE_URDF, pose=Pose(Point(x=+0.5)))
         celery = load_model(BLOCK_URDF, fixed_base=False)
         radish = load_model(SMALL_BLOCK_URDF, fixed_base=False)
-        #cup = load_model('models/dinnerware/cup/cup_small.urdf',
+        # cup = load_model('models/dinnerware/cup/cup_small.urdf',
         # Pose(Point(x=+0.5, y=+0.5, z=0.5)), fixed_base=False)
 
     body_names = {
@@ -142,6 +149,7 @@ def load_world():
 
     return robot, body_names, movable_bodies
 
+
 def postprocess_plan(plan):
     paths = []
     for name, args in plan:
@@ -150,6 +158,7 @@ def postprocess_plan(plan):
         elif name in ['move', 'move_free', 'move_holding', 'pick']:
             paths += args[-1].body_paths
     return Command(paths)
+
 
 #######################################################
 
@@ -162,7 +171,7 @@ def main(display=True, teleport=False):
     connect(use_gui=args.viewer)
     robot, names, movable = load_world()
     saved_world = WorldSaver()
-    #dump_world()
+    # dump_world()
 
     pddlstream_problem = pddlstream_from_problem(robot, movable=movable, teleport=teleport)
     _, _, _, stream_map, init, goal = pddlstream_problem
@@ -186,7 +195,7 @@ def main(display=True, teleport=False):
         disconnect()
         return
 
-    if not args.viewer: # TODO: how to reenable the viewer
+    if not args.viewer:  # TODO: how to reenable the viewer
         disconnect()
         connect(use_gui=True)
         load_world()
@@ -199,11 +208,12 @@ def main(display=True, teleport=False):
         command.control()
     else:
         # user_input('Execute?')
-        #command.step()
+        # command.step()
         command.refine(num_steps=10).execute(time_step=0.001)
 
     user_input('Finish?')
     disconnect()
+
 
 if __name__ == '__main__':
     main()
