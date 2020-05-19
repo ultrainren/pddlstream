@@ -25,6 +25,7 @@ from collections import namedtuple
 BASE_CONSTANT = 1
 BASE_VELOCITY = 0.5
 
+
 def place_movable(certified):
     for literal in certified:
         if literal[0] != 'not':
@@ -39,6 +40,7 @@ def place_movable(certified):
         if fact[0] == 'trajgraspcollision':
             _, a, o, g = fact[1:]
             # TODO: finish this
+
 
 # def get_base_motion_synth(problem, teleport=False):
 #     # TODO: could factor the safety checks if desired (but no real point)
@@ -55,6 +57,7 @@ def move_cost_fn(c):
     [t] = c.commands
     distance = t.distance(distance_fn=lambda q1, q2: get_distance(q1[:2], q2[:2]))
     return BASE_CONSTANT + distance / BASE_VELOCITY
+
 
 #######################################################
 
@@ -79,27 +82,33 @@ def extract_point2d(v):
             return extract_point2d(p)
     raise ValueError(v.stream)
 
+
 def opt_move_cost_fn(t):
     q1, q2 = t.values
     distance = get_distance(extract_point2d(q1), extract_point2d(q2))
     return BASE_CONSTANT + distance / BASE_VELOCITY
 
+
 #######################################################
 
 CustomValue = namedtuple('OptValue', ['stream', 'values'])
 
+
 def opt_pose_fn(o, r):
     p = CustomValue('p-sp', (r,))
     return p,
+
 
 def opt_ik_fn(a, o, p, g):
     q = CustomValue('q-ik', (p,))
     t = CustomValue('t-ik', tuple())
     return q, t
 
+
 def opt_motion_fn(q1, q2):
     t = CustomValue('t-pbm', (q1, q2))
     return t,
+
 
 #######################################################
 
@@ -110,20 +119,20 @@ def pddlstream_from_problem(problem, teleport=False):
     stream_pddl = read(get_file_path(__file__, 'stream.pddl'))
     constant_map = {}
 
-    #initial_bq = Pose(robot, get_pose(robot))
+    # initial_bq = Pose(robot, get_pose(robot))
     initial_bq = Conf(robot, get_group_joints(robot, 'base'), get_group_conf(robot, 'base'))
     init = [
-        ('CanMove',),
-        ('BConf', initial_bq),
-        ('AtBConf', initial_bq),
-        Equal(('PickCost',), 1),
-        Equal(('PlaceCost',), 1),
-    ] + [('Sink', s) for s in problem.sinks] + \
+               ('CanMove',),
+               ('BConf', initial_bq),
+               ('AtBConf', initial_bq),
+               Equal(('PickCost',), 1),
+               Equal(('PlaceCost',), 1),
+           ] + [('Sink', s) for s in problem.sinks] + \
            [('Stove', s) for s in problem.stoves] + \
            [('Connected', b, d) for b, d in problem.buttons] + \
            [('Button', b) for b, _ in problem.buttons]
     for arm in ARM_NAMES:
-    #for arm in problem.arms:
+        # for arm in problem.arms:
         joints = get_arm_joints(robot, arm)
         conf = Conf(robot, joints, get_joint_positions(robot, joints))
         init += [('Arm', arm), ('AConf', arm, conf), ('HandEmpty', arm), ('AtAConf', arm, conf)]
@@ -144,9 +153,9 @@ def pddlstream_from_problem(problem, teleport=False):
         init += [('BConf', goal_conf)]
         goal += [('AtBConf', goal_conf)]
     goal += [('Holding', a, b) for a, b in problem.goal_holding] + \
-                     [('On', b, s) for b, s in problem.goal_on] + \
-                     [('Cleaned', b)  for b in problem.goal_cleaned] + \
-                     [('Cooked', b)  for b in problem.goal_cooked]
+            [('On', b, s) for b, s in problem.goal_on] + \
+            [('Cleaned', b) for b in problem.goal_cleaned] + \
+            [('Cooked', b) for b in problem.goal_cooked]
 
     stream_map = {
         'sample-pose': from_gen_fn(get_stable_gen(problem)),
@@ -161,6 +170,7 @@ def pddlstream_from_problem(problem, teleport=False):
     # get_press_gen(problem, teleport=teleport)
 
     return domain_pddl, constant_map, stream_pddl, stream_map, init, goal
+
 
 #######################################################
 
@@ -188,7 +198,7 @@ def post_process(problem, plan, teleport=False):
             open_gripper = GripperCommand(problem.robot, a, position, teleport=teleport)
             detach = Detach(problem.robot, a, b)
             new_commands = [t, detach, open_gripper, t.reverse()]
-        elif name == 'clean': # TODO: add text or change color?
+        elif name == 'clean':  # TODO: add text or change color?
             body, sink = args
             new_commands = [Clean(body)]
         elif name == 'cook':
@@ -208,13 +218,14 @@ def post_process(problem, plan, teleport=False):
         commands += new_commands
     return commands
 
+
 #######################################################
 
 def main(display=True, teleport=False, partial=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('-simulate', action='store_true', help='Simulates the system')
     parser.add_argument('-viewer', action='store_true', help='enable the viewer while planning')
-    #parser.add_argument('-display', action='store_true', help='displays the solution')
+    # parser.add_argument('-display', action='store_true', help='displays the solution')
     args = parser.parse_args()
 
     connect(use_gui=args.viewer)
@@ -224,8 +235,8 @@ def main(display=True, teleport=False, partial=False):
     with HideOutput():
         problem = problem_fn()
     state_id = save_state()
-    #saved_world = WorldSaver()
-    #dump_world()
+    # saved_world = WorldSaver()
+    # dump_world()
 
     pddlstream_problem = pddlstream_from_problem(problem, teleport=teleport)
 
@@ -267,7 +278,7 @@ def main(display=True, teleport=False, partial=False):
         disconnect()
         connect(use_gui=True)
         with HideOutput():
-            problem_fn() # TODO: way of doing this without reloading?
+            problem_fn()  # TODO: way of doing this without reloading?
 
     if args.simulate:
         control_commands(commands)
@@ -276,6 +287,7 @@ def main(display=True, teleport=False, partial=False):
     # user_input('Finish?')
     disconnect()
     # TODO: need to wrap circular joints
+
 
 if __name__ == '__main__':
     main()

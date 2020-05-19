@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import time
 
+from pddlstream.algorithms.scheduling.plan_streams import OptimisticPlanSolver
 from pddlstream.algorithms.algorithm import parse_problem
 from pddlstream.algorithms.common import SolutionStore, stream_plan_complexity
 from pddlstream.algorithms.constraints import PlanConstraints
@@ -9,7 +10,7 @@ from pddlstream.algorithms.disabled import push_disabled, reenable_disabled, pro
 from pddlstream.algorithms.disable_skeleton import create_disabled_axioms
 from pddlstream.algorithms.incremental import process_stream_queue
 from pddlstream.algorithms.instantiation import Instantiator
-from pddlstream.algorithms.refinement import iterative_plan_streams, get_optimistic_solve_fn
+from pddlstream.algorithms.refinement import iterative_plan_streams, get_optimistic_solve_fn, plan_action_plan_stream
 from pddlstream.algorithms.reorder import reorder_stream_plan
 from pddlstream.algorithms.skeleton import SkeletonQueue
 from pddlstream.algorithms.visualization import reset_visualizations, create_visualizations, \
@@ -23,10 +24,12 @@ from pddlstream.language.statistics import load_stream_statistics, \
 from pddlstream.language.stream import Stream
 from pddlstream.utils import INF, elapsed_time, implies
 
+
 def get_negative_externals(externals):
-    negative_predicates = list(filter(lambda s: type(s) is Predicate, externals)) # and s.is_negative()
+    negative_predicates = list(filter(lambda s: type(s) is Predicate, externals))  # and s.is_negative()
     negated_streams = list(filter(lambda s: isinstance(s, Stream) and s.is_negated(), externals))
     return negative_predicates + negated_streams
+
 
 def partition_externals(externals, verbose=False):
     functions = list(filter(lambda s: type(s) is Function, externals))
@@ -37,6 +40,7 @@ def partition_externals(externals, verbose=False):
         print('Streams: {}\nFunctions: {}\nNegated: {}\nOptimizers: {}'.format(
             streams, functions, negative, optimizers))
     return streams, functions, negative, optimizers
+
 
 def solve_focused(problem, constraints=PlanConstraints(), stream_info={}, replan_actions=set(),
                   max_time=INF, max_iterations=INF,
@@ -95,42 +99,48 @@ def solve_focused(problem, constraints=PlanConstraints(), stream_info={}, replan
     has_optimizers = bool(optimizers)
     assert implies(has_optimizers, use_skeletons)
     skeleton_queue = SkeletonQueue(store, domain, disable=not has_optimizers)
-    disabled = set() # Max skeletons after a solution
+    disabled = set()  # Max skeletons after a solution
     while (not store.is_terminated()) and (num_iterations < max_iterations):
         start_time = time.time()
         num_iterations += 1
-        eager_instantiator = Instantiator(eager_externals, evaluations) # Only update after an increase?
+        eager_instantiator = Instantiator(eager_externals, evaluations)  # Only update after an increase?
         if eager_disabled:
             push_disabled(eager_instantiator, disabled)
         eager_calls += process_stream_queue(eager_instantiator, store,
                                             complexity_limit=complexity_limit, verbose=verbose)
 
-        print('\nIteration: {} | Complexity: {} | Skeletons: {} | Skeleton Queue: {} | Disabled: {} | Evaluations: {} | '
-              'Eager Calls: {} | Cost: {:.3f} | Search Time: {:.3f} | Sample Time: {:.3f} | Total Time: {:.3f}'.format(
-            num_iterations, complexity_limit, len(skeleton_queue.skeletons), len(skeleton_queue), len(disabled),
-            len(evaluations), eager_calls, store.best_cost, search_time, sample_time, store.elapsed_time()))
+        print(
+            '\nIteration: {} | Complexity: {} | Skeletons: {} | Skeleton Queue: {} | Disabled: {} | Evaluations: {} | '
+            'Eager Calls: {} | Cost: {:.3f} | Search Time: {:.3f} | Sample Time: {:.3f} | Total Time: {:.3f}'.format(
+                num_iterations, complexity_limit, len(skeleton_queue.skeletons), len(skeleton_queue), len(disabled),
+                len(evaluations), eager_calls, store.best_cost, search_time, sample_time, store.elapsed_time()))
         optimistic_solve_fn = get_optimistic_solve_fn(goal_exp, domain, negative,
                                                       replan_actions=replan_actions, reachieve=use_skeletons,
                                                       max_cost=min(store.best_cost, constraints.max_cost),
-                                                      max_effort=max_effort, effort_weight=effort_weight, **search_kwargs)
+                                                      max_effort=max_effort, effort_weight=effort_weight,
+                                                      **search_kwargs)
+        optms_plan_solver = OptimisticPlanSolver(goal_exp, domain, negative, search_kwargs,
+                                                 max_effort=max_effort, effort_weight=effort_weight)
         # TODO: just set unit effort for each stream beforehand
         if (max_skeletons is None) or (len(skeleton_queue.skeletons) < max_skeletons):
             disabled_axioms = create_disabled_axioms(skeleton_queue) if has_optimizers else []
             if disabled_axioms:
                 domain.axioms.extend(disabled_axioms)
-            stream_plan, action_plan, cost = iterative_plan_streams(
-                evaluations, (streams + functions + optimizers),
-                optimistic_solve_fn, complexity_limit, max_effort=max_effort)
+            # stream_plan, action_plan, cost = iterative_plan_streams(evaluations, (streams + functions + optimizers),
+            #                                                         optimistic_solve_fn, complexity_limit,
+            #                                                         max_effort=max_effort)
+            stream_plan, action_plan, cost = plan_action_plan_stream(optms_plan_solver, evaluations, (streams + functions + optimizers),
+                                                                     complexity_limit, max_effort=max_effort)
             for axiom in disabled_axioms:
                 domain.axioms.remove(axiom)
         else:
             stream_plan, action_plan, cost = INFEASIBLE, INFEASIBLE, INF
-        #stream_plan = replan_with_optimizers(evaluations, stream_plan, domain, externals) or stream_plan
+        # stream_plan = replan_with_optimizers(evaluations, stream_plan, domain, externals) or stream_plan
         stream_plan = combine_optimizers(evaluations, stream_plan)
-        #stream_plan = get_synthetic_stream_plan(stream_plan, # evaluations
+        # stream_plan = get_synthetic_stream_plan(stream_plan, # evaluations
         #                                       [s for s in synthesizers if not s.post_only])
         if reorder:
-            stream_plan = reorder_stream_plan(stream_plan) # This may be redundant when using reorder_combined_plan
+            stream_plan = reorder_stream_plan(stream_plan)  # This may be redundant when using reorder_combined_plan
 
         num_optimistic = sum(r.optimistic for r in stream_plan) if stream_plan else 0
         print('Stream plan ({}, {}, {:.3f}): {}\nAction plan ({}, {:.3f}): {}'.format(
@@ -149,9 +159,9 @@ def solve_focused(problem, constraints=PlanConstraints(), stream_info={}, replan
             if not eager_disabled:
                 reenable_disabled(evaluations, disabled)
 
-        #print(stream_plan_complexity(evaluations, stream_plan))
+        # print(stream_plan_complexity(evaluations, stream_plan))
         if use_skeletons:
-            #optimizer_plan = replan_with_optimizers(evaluations, stream_plan, domain, optimizers)
+            # optimizer_plan = replan_with_optimizers(evaluations, stream_plan, domain, optimizers)
             optimizer_plan = None
             if optimizer_plan is not None:
                 # TODO: post process a bound plan

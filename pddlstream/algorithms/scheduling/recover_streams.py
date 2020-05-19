@@ -5,11 +5,15 @@ from pddlstream.language.conversion import is_negated_atom, fact_from_evaluation
 from pddlstream.language.statistics import check_effort
 from pddlstream.utils import HeapElement, INF
 
-Node = namedtuple('Node', ['effort', 'result']) # TODO: include level
-EFFORT_OP = sum # max | sum
+Node = namedtuple('Node', ['effort', 'result'])  # TODO: include level
+EFFORT_OP = sum  # max | sum
 NULL_COND = (None,)
 
+
 def get_achieving_streams(evaluations, stream_results, max_effort=INF, **effort_args):
+    """
+    U{atom: }
+    """
     unprocessed_from_atom = defaultdict(list)
     node_from_atom = {NULL_COND: Node(0, None)}
     conditions_from_stream = {}
@@ -45,18 +49,20 @@ def get_achieving_streams(evaluations, stream_results, max_effort=INF, **effort_
     del node_from_atom[NULL_COND]
     return node_from_atom
 
+
 def evaluations_from_stream_plan(evaluations, stream_results, max_effort=INF):
     opt_evaluations = set(evaluations)
     for result in stream_results:
-        assert(not result.instance.disabled)
-        assert(not result.instance.enumerated)
+        assert (not result.instance.disabled)
+        assert (not result.instance.enumerated)
         domain = set(map(evaluation_from_fact, result.instance.get_domain()))
-        assert(domain <= opt_evaluations)
+        assert (domain <= opt_evaluations)
         opt_evaluations.update(map(evaluation_from_fact, result.get_certified()))
     node_from_atom = get_achieving_streams(evaluations, stream_results)
     result_from_evaluation = {evaluation_from_fact(f): n.result for f, n in node_from_atom.items()
                               if check_effort(n.effort, max_effort)}
     return result_from_evaluation
+
 
 def extract_stream_plan(node_from_atom, target_facts, stream_plan,
                         step_from_fact=None, step_from_stream=None):
@@ -79,4 +85,4 @@ def extract_stream_plan(node_from_atom, target_facts, stream_plan,
                             step_from_fact, step_from_stream)
         # TODO: dynamic programming version of this
         if result not in stream_plan:
-            stream_plan.append(result) # TODO: don't add if satisfied
+            stream_plan.append(result)  # TODO: don't add if satisfied

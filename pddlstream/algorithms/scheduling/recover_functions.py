@@ -31,7 +31,8 @@ def compute_function_plan(opt_evaluations, action_plan):
         action = action_instance.action
         if action is None:
             continue
-        args = [action_instance.var_mapping[p.name] for p in action.parameters]
+        args = [action_instance.var_mapping[p.name]
+                for p in action.parameters]
         function_result = extract_function_results(results_from_head, action, args)
         if function_result is not None:
             function_plan.add(function_result)

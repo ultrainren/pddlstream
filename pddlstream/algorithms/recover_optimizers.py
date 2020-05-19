@@ -11,8 +11,10 @@ from pddlstream.utils import neighbors_from_orders, get_mapping
 
 CLUSTER = True
 
+
 def get_optimizer(result):
     return result.external.optimizer if isinstance(result.external, ComponentStream) else None
+
 
 ##################################################
 
@@ -30,7 +32,7 @@ def combine_optimizer_plan(stream_plan, functions):
     for cluster_plan in cluster_plans:
         if all(isinstance(r, FunctionResult) for r in cluster_plan):
             continue
-        #if len(cluster_plan) == 1:
+        # if len(cluster_plan) == 1:
         #    optimizer_plan.append(cluster_plan[0])
         #    continue
         stream = OptimizerStream(optimizer, cluster_plan)
@@ -39,11 +41,12 @@ def combine_optimizer_plan(stream_plan, functions):
         optimizer_plan.append(result)
     return optimizer_plan
 
+
 def combine_optimizers(evaluations, external_plan):
     if not is_plan(external_plan):
         return external_plan
     stream_plan, function_plan = partition_external_plan(external_plan)
-    optimizers = {get_optimizer(r) for r in stream_plan} # None is like a unique optimizer
+    optimizers = {get_optimizer(r) for r in stream_plan}  # None is like a unique optimizer
     if len(optimizers - {None}) == 0:
         return external_plan
 
@@ -65,10 +68,11 @@ def combine_optimizers(evaluations, external_plan):
                 current_facts.update(result.get_certified())
                 combined_results.remove(result)
                 break
-        else: # TODO: can also just try one cluster and return
+        else:  # TODO: can also just try one cluster and return
             raise RuntimeError()
-            #return None
+            # return None
     return combined_plan
+
 
 ##################################################
 
@@ -112,9 +116,9 @@ def replan_with_optimizers(evaluations, external_plan, domain, optimizers):
         return None
     stream_plan, function_plan = partition_external_plan(external_plan)
     free_parameters = {o for r in stream_plan for o in r.output_objects}
-    #free_parameters = {o for r in stream_plan for o in r.output_objects if isinstance(o, OptimisticObject)}
+    # free_parameters = {o for r in stream_plan for o in r.output_objects if isinstance(o, OptimisticObject)}
     initial_evaluations = {e: n for e, n in evaluations.items() if n.result == INIT_EVALUATION}
-    #initial_evaluations = evaluations
+    # initial_evaluations = evaluations
     goal_facts = set()
     for result in stream_plan:
         goal_facts.update(filter(lambda f: evaluation_from_fact(f) not in
@@ -127,24 +131,25 @@ def replan_with_optimizers(evaluations, external_plan, domain, optimizers):
     # TODO: ensure correct ordering
     new_results = list(filter(lambda r: isinstance(r, ComponentStream), new_results))
 
-    #from pddlstream.algorithms.scheduling.recover_streams import get_achieving_streams, extract_stream_plan
-    #node_from_atom = get_achieving_streams(evaluations, stream_results) # TODO: make these lower effort
-    #extract_stream_plan(node_from_atom, target_facts, stream_plan)
+    # from pddlstream.algorithms.scheduling.recover_streams import get_achieving_streams, extract_stream_plan
+    # node_from_atom = get_achieving_streams(evaluations, stream_results) # TODO: make these lower effort
+    # extract_stream_plan(node_from_atom, target_facts, stream_plan)
 
     optimizer_results = []
-    for optimizer in {get_optimizer(r) for r in new_results}: # None is like a unique optimizer:
+    for optimizer in {get_optimizer(r) for r in new_results}:  # None is like a unique optimizer:
         relevant_results = [r for r in new_results if get_optimizer(r) == optimizer]
         optimizer_results.extend(combine_optimizer_plan(relevant_results, function_plan))
-    #print(str_from_object(set(map(fact_from_evaluation, evaluations))))
-    #print(str_from_object(set(goal_facts)))
+    # print(str_from_object(set(map(fact_from_evaluation, evaluations))))
+    # print(str_from_object(set(goal_facts)))
 
     # TODO: can do the flexibly sized optimizers search
     from pddlstream.algorithms.scheduling.postprocess import reschedule_stream_plan
     optimizer_plan = reschedule_stream_plan(initial_evaluations, goal_facts, copy.copy(domain),
-                                           (stream_plan + optimizer_results), unique_binding=True)
+                                            (stream_plan + optimizer_results), unique_binding=True)
     if not is_plan(optimizer_plan):
         return None
     return optimizer_plan + function_plan
+
 
 ##################################################
 

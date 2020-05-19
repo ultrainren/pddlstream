@@ -155,6 +155,32 @@ def obj_from_pddl(pddl):
         return OptimisticObject.from_name(pddl)
     raise ValueError(pddl)
 
+def fact2head(fact):
+    # Create_head_from_fact
+    return Head(get_prefix(fact), get_args(fact))
+
+def eval2fact(evaluation):
+    # Get fact from evaluation
+    fact = Fact(evaluation.head.function, evaluation.head.args)
+    if is_atom(evaluation):
+        return fact
+    elif evaluation.value is False:
+        return Not(fact)
+    return Equal(fact, evaluation.value)
+
+def fact2eval(fact):
+    # Create evaluation from fact
+    prefix = get_prefix(fact)
+    if prefix == EQ:
+        head, value = fact[1:]
+    elif prefix == NOT:
+        head = fact[1]
+        value = False
+    else:
+        head = fact
+        value = True
+    return Evaluation(fact2head(head), value)
+
 def values_from_objects(objects):
     return tuple(obj.value for obj in objects)
     #return tuple(map(value_from_object, objects))

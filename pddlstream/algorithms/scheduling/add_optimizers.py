@@ -10,6 +10,7 @@ from pddlstream.language.stream import Stream
 def using_optimizers(results):
     return any(isinstance(result.external, ComponentStream) for result in results)
 
+
 def add_optimizer_effects(instantiated, node_from_atom):
     # TODO: instantiate axioms with negative on effects for blocking
     # TODO: fluent streams using conditional effects. Special fluent predicate for inputs to constraint
@@ -36,6 +37,7 @@ def add_optimizer_effects(instantiated, node_from_atom):
                 # domain = {fact for result in stream_plan if result.external.info.simultaneous
                 #          for fact in result.instance.get_domain()}
                 # TODO: can streams depending on these be used if dependent preconditions are added to the action
+
 
 def recover_simultaneous(results, negative_streams, deferred_from_name, instances):
     result_from_stream_fact = {}

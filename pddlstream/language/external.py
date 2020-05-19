@@ -112,6 +112,10 @@ class Instance(object):
     def get_input_values(self):
         return values_from_objects(self.input_objects)
 
+    @property
+    def input_values(self):
+        return values_from_objects(self.input_objects)
+
     #def is_first_call(self): # TODO: use in streams
     #    return self.online_calls == 0
     #
